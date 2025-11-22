@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const ssh2 = require('ssh2');
 const Store = require('electron-store');
 
@@ -7,27 +8,61 @@ const store = new Store();
 let mainWindow = null;
 
 function createWindow() {
+  let preloadPath;
+  
+  if (app.isPackaged) {
+    // Production: preload.js nằm ngoài app.asar
+    preloadPath = path.join(process.resourcesPath, 'preload.js');
+    
+    // Nếu không tồn tại, copy từ app.asar
+    if (!fs.existsSync(preloadPath)) {
+      const sourcePreload = path.join(__dirname, 'preload.js');
+      if (fs.existsSync(sourcePreload)) {
+        fs.copyFileSync(sourcePreload, preloadPath);
+      }
+    }
+  } else {
+    // Development
+    preloadPath = path.join(__dirname, 'preload.js');
+  }
+
+  console.log('Preload path:', preloadPath);
+  console.log('Preload exists:', fs.existsSync(preloadPath));
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      preload: preloadPath
     },
     backgroundColor: '#0f172a',
-    titleBarStyle: 'default',
-    frame: true
+    show: false
+  });
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
   });
 
   const isDev = !app.isPackaged;
   
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL('http://localhost:5173')
+      .then(() => console.log('Loaded dev URL'))
+      .catch(err => console.error('Failed to load:', err));
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, 'dist/renderer/index.html'));
+    const indexPath = path.join(__dirname, 'dist', 'renderer', 'index.html');
+    console.log('Index path:', indexPath);
+    mainWindow.loadFile(indexPath)
+      .then(() => console.log('Loaded production'))
+      .catch(err => console.error('Failed to load:', err));
   }
+
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('Failed to load:', errorCode, errorDescription);
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
